@@ -61,6 +61,15 @@ async fn http_handler(req: Request<hyper::body::Incoming>) -> Result<Response<Fu
 /*
     Managing websocket connections, pairing two consequent websocket connection and transmitting messages between
     Considered to be the prototype for exchanging moves
+
+    Bugs:
+     - we need to decide who is black and who is white and let them know
+
+     - when one of the clients disconnects, the other should be informed about this (throw an error or smth)
+       with a closing handshake or smth
+           When closing a connection from client, we should send a special message and with this we'll also disconnect from other client too
+
+     - We need to deal when a user is closed the connection before someone else is paired up with them
 */
 async fn ws_handler(req: Request<hyper::body::Incoming>, waiting_slot: WaitingSlot) -> Result<Response<Full<Bytes>>, Infallible>{
 
@@ -108,14 +117,14 @@ async fn ws_handler(req: Request<hyper::body::Incoming>, waiting_slot: WaitingSl
                         }
                     }
                 };
-
                 let partner_tx = match already_partner_tx {
                     Some(already_partner_tx) => already_partner_tx,
 
                     None => {
                         match my_rx.recv().await { // wait until recieve - someone sends something
 
-                            Some(Enveloppe::PartnerAdress(address)) => address, // when someone entered return its address to slot ?
+                            Some(Enveloppe::PartnerAdress(address)) => {let _ = address.send(Enveloppe::Game(Message::text("Youre black (opponent)"))).await;
+                            address}, // when someone entered return its address to slot ?
                             _ => {
                                 println!("Error unexpected");
                                 return;
@@ -128,8 +137,12 @@ async fn ws_handler(req: Request<hyper::body::Incoming>, waiting_slot: WaitingSl
 
                 // send to partner my address
                 let _ = partner_tx.send(Enveloppe::PartnerAdress(my_tx.clone())).await;
+                
                 println!("paired done");
 
+                let _ = my_tx.send(Enveloppe::Game(Message::text("GameStarting"))).await;
+                let _ = my_tx.send(Enveloppe::Game(Message::text("I'm white"))).await;
+                //let _ = partner_tx.send(Enveloppe::Game(Message::text("GameStarting"))).await;
 
                 loop {
 
@@ -207,6 +220,14 @@ async fn upper_branch(req: Request<hyper::body::Incoming>, waiting_slot: Waiting
     }
 }
 
+/*
+    When user clicks on "play game" button, we will hold in a pool-like waiting list. When another user also clicks on "play game" button
+    they'll get matched up immediatly (We'll consider smart matching algorithms way later). After, they'll be randomly assigned their colors. 
+    As the logic in frontend tells, white will make the first move. That move should be sent over to server via ws connection (already implemented
+    in ws_handler). The receiving end also should make the move automatically and set the turn to black 
+
+     - Put first user to pool, when second user comes match them (already implemented by ws_handler ?)
+*/
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> { // 
